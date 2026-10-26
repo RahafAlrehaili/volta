@@ -4,7 +4,6 @@ import pickle
 import zipfile
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -172,33 +171,16 @@ def date_picker(label, container=st):
   )
 
 
-# Algorithm to calculate the cheapest consecutive duration for device running
+# Cheapest time to run a device: computed by fc.find_cheapest_hours (forecast.py),
+# here it only gets the day's Spain-time labels
 def find_cheapest_window(df, power_kw, duration_hours):
-  prices = df["Price_EUR"].values
-  n = len(prices)
-  duration_hours = min(int(duration_hours), n)
-
-  min_cost = float("inf")
-  best_start_idx = 0
-
-  for i in range(n - duration_hours + 1):
-    window_prices = prices[i : i + duration_hours]
-    # Total cost = sum of (price in EUR/MWh / 1000) * power_kw
-    window_cost = np.sum((window_prices / 1000.0) * power_kw)
-    if window_cost < min_cost:
-      min_cost = window_cost
-      best_start_idx = i
-
-  best_end_idx = best_start_idx + duration_hours
-  start_hour = df.loc[best_start_idx, "Hour_Label"]
-  end_hour = df.loc[best_end_idx - 1, "End_Label"]  # end of the last hour (Spain time)
-
-  avg_window_price = np.mean(prices[best_start_idx:best_end_idx])
-
+  best = fc.find_cheapest_hours(df["Price_EUR"].values, power_kw, duration_hours)
+  start_hour = df.loc[best["start"], "Hour_Label"]
+  end_hour = df.loc[best["end"] - 1, "End_Label"]  # end of the last hour (Spain time)
   return {
       "time_window": f"{start_hour} – {end_hour}",
-      "estimated_cost": min_cost,
-      "avg_price": avg_window_price,
+      "estimated_cost": best["cost"],
+      "avg_price": best["avg_price"],
   }
 
 

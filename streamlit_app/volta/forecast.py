@@ -284,11 +284,20 @@ def score(df: pd.DataFrame) -> pd.DataFrame:
 def find_cheapest_hours(predictions, power_kw: float, hours: int) -> dict:
     """
     Step 16 of the notebook: the cheapest block of `hours` consecutive hours.
+    This is the only place this is computed; the app's device recommendation uses it.
+
+    - cost of a block (EUR) = sum of price (EUR/MWh) / 1000 * power_kw over its hours
+    - `hours` is capped at the number of predictions (24)
+    - equal costs: the earliest block wins
+    - the prices keep their dtype (float32 for the LSTM), so the sums and the
+      choice between equal blocks are exactly what the app has always shown
     `start`/`end` are positions inside the 24 forecast hours (end is exclusive).
     """
-    predictions = np.asarray(predictions, dtype=float)
-    costs = [power_kw * hours * np.mean(predictions[i:i + hours]) / 1000
+    predictions = np.asarray(predictions)
+    hours = min(int(hours), len(predictions))
+    costs = [np.sum((predictions[i:i + hours] / 1000.0) * power_kw)
              for i in range(len(predictions) - hours + 1)]
-    start = int(np.argmin(costs))
+    start = int(np.argmin(costs))  # first minimum = earliest block
     return {"start": start, "end": start + hours, "cost": float(costs[start]),
+            "avg_price": float(np.mean(predictions[start:start + hours])),
             "worst_cost": float(np.max(costs))}
