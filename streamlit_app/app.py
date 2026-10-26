@@ -1,4 +1,7 @@
 import datetime
+import logging
+import pickle
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -71,7 +74,66 @@ MODEL_COLUMNS = {
     "Lag-168 baseline (last week)": "lag_168",
 }
 
-all_predictions = cache.predictions()
+# ---------------------------------------------------------
+# Errors: a clear message for the user, the full details in the log
+# ---------------------------------------------------------
+# Any other uncaught error: Streamlit shows a generic message instead of the
+# traceback, and still prints the full traceback to the console / app logs.
+st.set_option("client.showErrorDetails", "none")
+
+logger = logging.getLogger("volta.app")
+if not logger.handlers:  # the script reruns on every click: add the handler once
+  _handler = logging.StreamHandler()  # stderr = terminal, or "Manage app" logs on Streamlit Cloud
+  _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+  logger.addHandler(_handler)
+  logger.setLevel(logging.INFO)
+
+UNEXPECTED_ERROR = (
+    "Something went wrong while preparing the forecast. The problem has been"
+    " logged for the VOLTA team. Please try again later."
+)
+
+
+def run_step(step, action, expected_errors, message, details):
+  """
+  Run one loading step. If it fails, log the full error for the developer,
+  show `message` to the user (no file paths, no traceback) and stop this run,
+  so nothing is shown from missing or broken data. Streamlit does not cache
+  failures, so the next visit tries again.
+  """
+  try:
+    return action()
+  except expected_errors:
+    logger.exception("%s failed (%s)", step, details)
+    st.error(message, icon=":material/error:")
+  except Exception:  # a bug, not a data/model problem: keep it separate in the log
+    logger.exception("Unexpected error while %s (%s)", step.lower(), details)
+    st.error(UNEXPECTED_ERROR, icon=":material/error:")
+  st.stop()
+
+
+# Each step is cached in volta/cache.py, so these calls load nothing twice:
+# cache.predictions() reuses the price data and the model loaded just before.
+run_step(
+    "Loading the price data", cache.prices,
+    (OSError, ValueError),  # missing/unreadable file, bad CSV, missing column, bad dates
+    "Could not load the electricity price data. Please try again later.",
+    f"data file: {fc.DATA_FILE}",
+)
+run_step(
+    "Loading the model and scaler", cache.model,
+    # missing/unreadable file, scaler that does not match training, TensorFlow
+    # not installed, broken .pkl or .keras file
+    (OSError, ValueError, ImportError, EOFError, pickle.UnpicklingError, zipfile.BadZipFile),
+    "Could not load the forecasting model. Please try again later.",
+    f"model: {fc.MODEL_FILE}, scaler: {fc.SCALER_FILE}",
+)
+all_predictions = run_step(
+    "Creating the forecasts", cache.predictions,
+    (ValueError,),  # the checks in volta/forecast.py: bad prices, shapes, NaN output
+    "Could not create the price forecasts. Please try again later.",
+    f"data file: {fc.DATA_FILE}",
+)
 FIRST_DAY = all_predictions["day"].dt.date.min()
 LAST_DAY = all_predictions["day"].dt.date.max()
 
