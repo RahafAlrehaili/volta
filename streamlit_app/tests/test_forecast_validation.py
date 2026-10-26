@@ -187,10 +187,59 @@ def test_input_with_wrong_shape():
         fc.check_model_inputs(FakeModel(), X_past[:, :100], X_future)
 
 
-def test_input_with_swapped_feature_order():
-    X_past, X_future = make_inputs()
+# --------------------------------------------------------- feature order ---
+def order_case(binary_prices=False):
+    """Named features and correctly built inputs for 2 forecast days (like predict_all)."""
+    hours = 24 * 10
+    if binary_prices:  # scaled prices that are exactly 0/1, like is_weekend
+        scaled = np.where(np.arange(hours) % 3 == 0, 0.0, 1.0)
+    else:
+        scaled = np.linspace(0.2, 0.8, hours)
+    weekend = fc.weekend_flag(pd.date_range("2015-01-01", periods=hours, freq="h", tz="UTC"))
+    pos = np.array([168, 192])
+    features = np.column_stack([scaled, weekend])
+    X_past = np.stack([features[p - 168:p] for p in pos])
+    X_future = np.stack([features[p:p + 24, 1:] for p in pos])
+    return X_past, X_future, scaled, weekend, pos, features
+
+
+@pytest.mark.parametrize("binary_prices", [False, True])
+def test_correct_feature_order_passes(binary_prices):
+    fc.check_feature_order(*order_case(binary_prices)[:5])
+
+
+@pytest.mark.parametrize("binary_prices", [False, True])
+def test_swapped_past_columns_are_detected(binary_prices):
+    X_past, X_future, scaled, weekend, pos, _ = order_case(binary_prices)
+    swapped = X_past[:, :, ::-1]
+    assert swapped.shape == X_past.shape  # same shape: only the order is wrong
+    with pytest.raises(ValueError, match=r"past column 0 \(scaled price\)"):
+        fc.check_feature_order(swapped, X_future, scaled, weekend, pos)
+
+
+def test_future_prices_instead_of_is_weekend_are_detected():
+    # Future prices are unknown at forecast time: feeding them would be leakage.
+    X_past, _, scaled, weekend, pos, features = order_case(binary_prices=True)
+    leaked = np.stack([features[p:p + 24, :1] for p in pos])
+    assert leaked.shape == (2, 24, 1)
+    with pytest.raises(ValueError, match=r"future column 0 \(is_weekend\)"):
+        fc.check_feature_order(X_past, leaked, scaled, weekend, pos)
+
+
+def test_past_window_shifted_by_one_hour_is_detected():
+    _, X_future, scaled, weekend, pos, features = order_case()
+    shifted = np.stack([features[p - 167:p + 1] for p in pos])  # includes the forecast hour
+    assert shifted.shape == (2, 168, 2)
+    with pytest.raises(ValueError, match="past column 0"):
+        fc.check_feature_order(shifted, X_future, scaled, weekend, pos)
+
+
+def test_predict_all_stops_if_features_are_built_in_the_wrong_order(scaler, monkeypatch):
+    # Simulate a code change that builds [is_weekend, price] instead of [price, is_weekend]
+    real_column_stack = np.column_stack
+    monkeypatch.setattr(fc.np, "column_stack", lambda cols: real_column_stack(cols[::-1]))
     with pytest.raises(ValueError, match="feature order"):
-        fc.check_model_inputs(FakeModel(), X_past[:, :, ::-1], X_future)
+        fc.predict_all(hourly(), FakeModel(), scaler)
 
 
 def test_model_trained_on_other_inputs(scaler):

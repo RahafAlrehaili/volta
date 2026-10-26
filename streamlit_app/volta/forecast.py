@@ -161,22 +161,40 @@ def validate_scaler(scaler, price: pd.Series) -> None:
 
 
 def check_model_inputs(model, X_past: np.ndarray, X_future: np.ndarray) -> None:
-    """Stop if the inputs do not have the shapes and feature order the model was trained with."""
+    """Stop if the inputs do not have the shapes the model was trained with."""
     n = len(X_past)
     if X_past.shape != (n, *PAST_SHAPE) or X_future.shape != (n, *FUTURE_SHAPE):
         raise ValueError(f"Model inputs have shapes {X_past.shape} and {X_future.shape}; "
                          f"expected (days, {INPUT_WINDOW}, 2) and (days, {H}, 1).")
-    # is_weekend is the 2nd past column and the only future column, so it must be 0/1.
-    # If the columns were swapped, the scaled price would show up here instead.
-    for name, flags in [("past", X_past[:, :, 1]), ("future", X_future[:, :, 0])]:
-        if not np.isin(flags, (0, 1)).all():
-            raise ValueError(f"The {name} is_weekend column is not 0/1: the feature order is wrong.")
     # A saved Keras model knows the input shapes it was trained with: compare them too
     if hasattr(model, "inputs"):
         model_shapes = [tuple(i.shape[1:]) for i in model.inputs]
         if model_shapes != [PAST_SHAPE, FUTURE_SHAPE]:
             raise ValueError(f"This model expects inputs {model_shapes}, but VOLTA builds "
                              f"{[PAST_SHAPE, FUTURE_SHAPE]}. Was a different model file saved?")
+
+
+def check_feature_order(X_past: np.ndarray, X_future: np.ndarray, scaled: np.ndarray,
+                        weekend: np.ndarray, pos: np.ndarray) -> None:
+    """
+    Stop unless every input column holds the feature it should, in the training order
+    (notebook cells 46 and 77): past = [scaled price, is_weekend] of the 168 hours
+    before each day, future = [is_weekend] of its 24 hours (never prices).
+
+    The values alone cannot prove the order (scaled prices can also be 0/1), so each
+    column is compared with the named feature it must come from.
+    """
+    past_rows = pos[:, None] + np.arange(-INPUT_WINDOW, 0)  # (days, 168) row numbers
+    future_rows = pos[:, None] + np.arange(H)               # (days, 24)
+    columns = {
+        "past column 0 (scaled price)": (X_past[:, :, 0], scaled[past_rows]),
+        "past column 1 (is_weekend)": (X_past[:, :, 1], weekend[past_rows]),
+        "future column 0 (is_weekend)": (X_future[:, :, 0], weekend[future_rows]),
+    }
+    for name, (got, expected) in columns.items():
+        if not np.array_equal(got, expected):
+            raise ValueError(f"Model input {name} does not hold that feature: the feature "
+                             "order or the hours are wrong.")
 
 
 def check_model_output(pred_scaled, n_days: int) -> None:
@@ -221,6 +239,7 @@ def predict_all(price: pd.Series, model, scaler) -> pd.DataFrame:
     X_past = np.stack([features[p - INPUT_WINDOW:p] for p in pos])          # (days, 168, 2)
     X_future = np.stack([features[p:p + H, 1:] for p in pos])               # (days, 24, 1)
     check_model_inputs(model, X_past, X_future)
+    check_feature_order(X_past, X_future, scaled, weekend_flag(price.index), pos)
 
     pred_scaled = model.predict([X_past, X_future], batch_size=256, verbose=0)
     check_model_output(pred_scaled, len(days))
