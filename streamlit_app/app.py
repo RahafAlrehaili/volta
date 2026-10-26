@@ -7,6 +7,7 @@ import plotly.express as px
 import streamlit as st
 
 from volta import cache
+from volta import forecast as fc
 
 # ---------------------------------------------------------
 # Page Configuration & High-End Dark Styling
@@ -76,11 +77,14 @@ LAST_DAY = all_predictions["day"].dt.date.max()
 
 
 def get_24h_predictions(selected_date, model_choice="LSTM (Best)"):
-  """The 24 forecast hours (00:00-23:00 UTC) of one day, plus the real price."""
+  """The 24 forecast hours of one day (from 00:00 UTC), labelled in Spain time."""
   day = cache.day_forecast(selected_date)
+  # 25 UTC times: the start of each forecast hour + the end of the last one
+  edges = list(day["timestamp"]) + [day["timestamp"].iloc[-1] + pd.Timedelta(hours=1)]
+  labels = fc.local_hour_labels(edges)
   return pd.DataFrame({
-      "Hour_Label": day["timestamp"].dt.strftime("%H:%M"),
-      "Hour": day["timestamp"].dt.hour,
+      "Hour_Label": labels[:-1],  # start of each hour (Spain time)
+      "End_Label": labels[1:],    # end of each hour (Spain time)
       "Price_EUR": day[MODEL_COLUMNS[model_choice]].round(2),
       "Actual_EUR": day["actual"].round(2),
   })
@@ -125,7 +129,7 @@ def find_cheapest_window(df, power_kw, duration_hours):
 
   best_end_idx = best_start_idx + duration_hours
   start_hour = df.loc[best_start_idx, "Hour_Label"]
-  end_hour = f"{best_end_idx:02d}:00" if best_end_idx < 24 else "24:00"
+  end_hour = df.loc[best_end_idx - 1, "End_Label"]  # end of the last hour (Spain time)
 
   avg_window_price = np.mean(prices[best_start_idx:best_end_idx])
 
@@ -210,6 +214,10 @@ if page == "1. ⚡ Forecast & Device Optimizer":
 
   with col_chart:
     st.subheader("📈 Predicted Electricity Price (Next 24 Hours)")
+    st.caption(
+        f"Spain time (Europe/Madrid): {df_day['Hour_Label'].iloc[0]} →"
+        f" {df_day['End_Label'].iloc[-1]}. (+1) = next day."
+    )
     # product view: show the forecast only (the real price is not known in advance)
     chart_df = df_day.rename(columns={"Price_EUR": model_choice})
     fig_line = px.line(
@@ -218,8 +226,9 @@ if page == "1. ⚡ Forecast & Device Optimizer":
         y=[model_choice],
         markers=True,
         color_discrete_sequence=["#10b981"],
-        labels={"value": "Price (€/MWh)", "Hour_Label": "Hour (UTC)", "variable": ""},
+        labels={"value": "Price (€/MWh)", "Hour_Label": "Hour (Spain time)", "variable": ""},
     )
+    fig_line.update_xaxes(type="category")  # keep the labels in time order
     fig_line.update_traces(line_width=3, selector={"name": model_choice})
     fig_line.update_layout(
         template="plotly_dark",
@@ -260,7 +269,7 @@ if page == "1. ⚡ Forecast & Device Optimizer":
           f"""
             <div class="recommendation-box">
                 <span style="background-color: #10b981; color: black; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;">Lowest cost</span>
-                <p style="margin-top: 6px; margin-bottom: 2px; color: #d1d5db; font-size: 12px;">⏰ Recommended Time</p>
+                <p style="margin-top: 6px; margin-bottom: 2px; color: #d1d5db; font-size: 12px;">⏰ Recommended Time (Spain time)</p>
                 <h3 style="color: #ffffff; margin: 0;">{res['time_window']}</h3>
                 <hr style="border-color: #059669; margin: 8px 0;">
                 <div style="display: flex; justify-content: space-between;">
@@ -286,7 +295,8 @@ elif page == "2. 📊 Forecast Insights":
   st.markdown(
       "The cheapest and most expensive forecast hours of the selected day."
       " Hours are grouped into low, moderate and high prices compared with"
-      " that day's average."
+      " that day's average. All hours are Spain time (Europe/Madrid);"
+      " (+1) = next day."
   )
   st.markdown("---")
 
@@ -337,9 +347,9 @@ elif page == "2. 📊 Forecast Insights":
           "Moderate": "#f59e0b",
           "High Price": "#ef4444",
       },
-      labels={"Price_EUR": "Price (€/MWh)", "Hour_Label": "Hour (UTC)"},
-      # keep the hours in time order (00:00 -> 23:00), not grouped by colour
-      category_orders={"Hour_Label": [f"{h:02d}:00" for h in range(24)]},
+      labels={"Price_EUR": "Price (€/MWh)", "Hour_Label": "Hour (Spain time)"},
+      # keep the hours in time order, not grouped by colour
+      category_orders={"Hour_Label": list(df_day["Hour_Label"])},
   )
   fig_bar.update_layout(
       template="plotly_dark",

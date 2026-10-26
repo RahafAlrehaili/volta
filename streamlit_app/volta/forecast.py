@@ -62,6 +62,23 @@ def weekend_flag(index: pd.DatetimeIndex) -> np.ndarray:
     return (index.tz_convert(TZ).dayofweek >= 5).astype(int)
 
 
+def local_hour_labels(timestamps) -> list[str]:
+    """
+    "HH:MM" in Spain time (summer and winter time) for a list of UTC timestamps.
+
+    - Hours on a later local day than the first one get " (+1)".
+    - On the October clock change one local hour happens twice, so those two
+      labels also get their zone ("02:00 CEST", "02:00 CET") to stay unique.
+    """
+    local = pd.DatetimeIndex(timestamps).tz_convert(TZ)
+    first_day = local[0].date()
+    labels = pd.Series([t.strftime("%H:%M") + (" (+1)" if t.date() > first_day else "")
+                        for t in local])
+    repeated = labels.duplicated(keep=False)
+    return [f"{label} {t.strftime('%Z')}" if rep else label
+            for label, t, rep in zip(labels, local, repeated)]
+
+
 def forecast_days(price: pd.Series) -> pd.DatetimeIndex:
     """Every day (00:00 UTC) that has 168 past hours and 24 known future hours."""
     first = TRAIN_START + pd.Timedelta(hours=INPUT_WINDOW)
