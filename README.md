@@ -105,7 +105,7 @@ You need **Python 3.12** and **git**.
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/Ghadi213/volta.git
+git clone https://github.com/RahafAlrehaili/volta.git
 cd volta
 ```
 
