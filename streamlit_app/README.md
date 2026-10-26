@@ -66,7 +66,7 @@ the app shows a short message and stops. The full error is written to the logs
 ## Deploy (Streamlit Community Cloud)
 
 1. Push to GitHub.
-2. On share.streamlit.io: **Create app** → repository `Ghadi213/volta`, branch `main`,
+2. On share.streamlit.io: **Create app** → repository `RahafAlrehaili/volta`, branch `main`,
    main file `streamlit_app/app.py`.
 3. In **Advanced settings** choose Python 3.12, then **Deploy**.
 
