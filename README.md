@@ -17,6 +17,8 @@
   <img src="https://img.shields.io/badge/Plotly-3F4F75?logo=plotly&logoColor=white" alt="Plotly">
   <img src="https://img.shields.io/badge/Streamlit-FF4B4B?logo=streamlit&logoColor=white" alt="Streamlit">
   <img src="https://img.shields.io/badge/Jupyter-Notebook-F37626?logo=jupyter&logoColor=white" alt="Jupyter">
+  <img src="https://img.shields.io/badge/pytest-tested-0A9EDC?logo=pytest&logoColor=white" alt="pytest">
+  <img src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white" alt="Docker">
 </p>
 
 VOLTA is a time-series forecasting project that predicts Spain's actual electricity price for each of the next 24 hours.
@@ -24,7 +26,7 @@ VOLTA is a time-series forecasting project that predicts Spain's actual electric
 We trained and compared LSTM and GRU models on historical prices, tested them against simple baselines, and built an interactive Streamlit dashboard that shows the 24-hour forecast and suggests the cheapest time to run a device.
 
 <p align="center">
-  <a href="https://xc6yrh3qvv8sbyvwziuvte.streamlit.app/"><img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg" alt="Open the live dashboard in Streamlit"></a>
+  <a href="https://volta-app.streamlit.app/"><img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg" alt="Open the live dashboard in Streamlit"></a>
 </p>
 
 ## Data
@@ -54,6 +56,21 @@ The final model is an **LSTM with an `is_weekend` feature**, trained on 2015–2
 
 On average, the forecast is about 4 € away from the real price, which is **22.5% more accurate than the best baseline (Lag-24)**.
 
+## Dashboard
+
+The [live dashboard](https://volta-app.streamlit.app/) runs the final LSTM on every day of the data:
+
+- **Forecast & Device Optimizer:** the 24-hour price forecast for a chosen day, and the cheapest block of hours to run a device (based on its power and run time) with the estimated cost.
+- **Forecast Insights:** the cheapest and most expensive hours of the day, grouped into low, moderate and high prices.
+- **Spain time:** the model forecasts from 00:00 UTC, but every hour is shown in Spain time (Europe/Madrid), including summer/winter clock changes. `(+1)` marks hours on the next day.
+
+### Reliability
+
+- **Input checks:** before forecasting, the app checks the price data (numbers only, hourly, no gaps or duplicates), that the scaler matches the 2015–2017 training data, and that the model inputs and outputs have the right shapes and feature order. If something is wrong it stops with a clear error instead of fixing data silently.
+- **Clear error messages:** if the data or model fails to load, users see a short message, while the full details are written to the app logs.
+- **One shared calculation:** the cheapest-hours recommendation is computed in one function (`find_cheapest_hours` in `volta/forecast.py`), used by the app and covered by tests.
+- **Tests:** `pytest` tests cover the input checks, the error handling and the cheapest-hours recommendation.
+
 ## Project Structure
 
 ```
@@ -70,10 +87,12 @@ volta/
 ├─ models/                       Final model and scaler saved by final_model.ipynb
 ├─ streamlit_app/                Interactive dashboard (has its own data and model copy)
 │  ├─ app.py
-│  ├─ volta/                     Model inputs, predictions and caching
+│  ├─ volta/                     Model inputs, checks, predictions and caching
+│  ├─ tests/                     pytest tests (checks, errors, cheapest hours)
 │  ├─ data/
 │  ├─ models/
-│  └─ assets/
+│  ├─ assets/
+│  └─ Dockerfile                 Runs the dashboard in a container
 ├─ assets/                       README images
 ├─ requirements.txt              Packages for the notebooks
 └─ README.md
@@ -126,7 +145,7 @@ Run them in this order: `data_quality` → `data_preparation` → `eda` → `fea
 
 ### 5. Run the dashboard
 
-> **Just want to see it?** The dashboard is live at **[xc6yrh3qvv8sbyvwziuvte.streamlit.app](https://xc6yrh3qvv8sbyvwziuvte.streamlit.app/)**, no installation needed.
+> **Just want to see it?** The dashboard is live at **[volta-app.streamlit.app](https://volta-app.streamlit.app/)**, no installation needed.
 
 To run it on your own machine: the app does not need the Kaggle download: its data and trained model are already in `streamlit_app/`.
 
@@ -137,6 +156,24 @@ streamlit run app.py
 ```
 
 It opens at http://localhost:8501. The first load takes a few seconds while the model predicts every day. Press `Ctrl + C` in the terminal to stop it.
+
+### 6. Run the dashboard with Docker (optional)
+
+```bash
+cd streamlit_app
+docker build -t volta .
+docker run -p 8501:8501 volta
+```
+
+Then open http://localhost:8501.
+
+### 7. Run the tests
+
+```bash
+cd streamlit_app
+pip install pytest
+python -m pytest tests -v
+```
 
 ## Team
 
